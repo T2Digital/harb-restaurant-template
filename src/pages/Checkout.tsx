@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { useCart } from '../CartContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, onSnapshot, runTransaction, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { serverTimestamp, onSnapshot, runTransaction, getDoc, setDoc, updateDoc, addDoc, arrayUnion } from 'firebase/firestore';
+import { tenantCollection as collection, tenantDoc as doc } from '../tenantBootstrap';
 import { PAYMENT_METHODS } from '../constants';
 import { MapPin, CreditCard, Phone, User, CheckCircle2, Copy, Rocket, Upload, Image as ImageIcon, X, History } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -21,6 +22,13 @@ export default function Checkout() {
   const [address, setAddress] = useState('');
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0].id);
+  const [orderType, setOrderType] = useState<'delivery' | 'takeaway'>('delivery');
+  const [enableCash, setEnableCash] = useState(true);
+  const [restaurantName, setRestaurantName] = useState(
+    ((typeof window !== 'undefined' && (window as any).__TENANT_BRAND__?.name) as string) || 'مطعم حرب'
+  );
+  const [deliveryZones, setDeliveryZones] = useState<Array<{ id: string; name: string; fee: number }>>([]);
+  const [selectedZoneId, setSelectedZoneId] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [paymentNumber, setPaymentNumber] = useState('01000315777'); // Default
@@ -64,12 +72,28 @@ export default function Checkout() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().paymentNumber) {
-        setPaymentNumber(docSnap.data().paymentNumber);
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        if (d.paymentNumber) setPaymentNumber(d.paymentNumber);
+        if (d.restaurantName) setRestaurantName(d.restaurantName);
+        if (typeof d.enableCash === 'boolean') {
+          setEnableCash(d.enableCash);
+          if (!d.enableCash) {
+            setPaymentMethod(prev => prev === 'cash' ? (PAYMENT_METHODS.find(m => m.id !== 'cash')?.id || 'vodafone_cash') : prev);
+          }
+        }
+        if (Array.isArray(d.deliveryZones)) {
+          setDeliveryZones(d.deliveryZones);
+          setSelectedZoneId(prev => prev || d.deliveryZones[0]?.id || '');
+        }
       }
     });
     return () => unsubscribe();
   }, []);
+
+  const selectedZone = orderType === 'delivery' ? deliveryZones.find(z => z.id === selectedZoneId) : undefined;
+  const deliveryFee = orderType === 'delivery' ? Number(selectedZone?.fee || 0) : 0;
+  const finalTotal = total + deliveryFee;
 
   // Redirect to cart if empty
   useEffect(() => {
@@ -223,6 +247,9 @@ export default function Checkout() {
         customerId: user?.uid || null,
         customerName: name,
         customerPhone: phone,
+        orderType,
+        deliveryZone: selectedZone?.name || null,
+        deliveryFee,
         items: items.map(i => ({
           id: i.menuItemId,
           name: i.name,
@@ -231,11 +258,14 @@ export default function Checkout() {
           size: i.size || null,
           notes: i.notes || null
         })),
-        totalAmount: total,
+        subtotal: total,
+        totalAmount: finalTotal,
         status: 'pending',
         paymentMethod,
         paymentStatus: paymentMethod === 'cash' ? 'pending' : 'awaiting_confirmation',
-        location: location ? { ...location, address: address || '' } : { lat: 0, lng: 0, address: address || '' },
+        location: orderType === 'takeaway'
+          ? { lat: 0, lng: 0, address: 'استلام من الفرع (Pickup)' }
+          : (location ? { ...location, address: address || '' } : { lat: 0, lng: 0, address: address || '' }),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -397,6 +427,45 @@ export default function Checkout() {
             </div>
           </div>
 
+          {/* Order Type Selector: Delivery vs Pickup */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">نوع الطلب</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setOrderType('delivery')}
+                className={`p-3 rounded-xl border text-sm font-bold transition-all ${orderType === 'delivery' ? 'border-yellow-500 bg-yellow-500/15 text-yellow-400' : 'border-white/10 bg-black/30 text-slate-400'}`}
+              >
+                🛵 توصيل للمنزل
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderType('takeaway')}
+                className={`p-3 rounded-xl border text-sm font-bold transition-all ${orderType === 'takeaway' ? 'border-yellow-500 bg-yellow-500/15 text-yellow-400' : 'border-white/10 bg-black/30 text-slate-400'}`}
+              >
+                🛍️ استلام من الفرع (مجاناً)
+              </button>
+            </div>
+          </div>
+
+          {orderType === 'delivery' && deliveryZones.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">منطقة التوصيل</label>
+              <select
+                value={selectedZoneId}
+                onChange={e => setSelectedZoneId(e.target.value)}
+                className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-yellow-500"
+              >
+                {deliveryZones.map(z => (
+                  <option key={z.id} value={z.id} className="bg-slate-900">
+                    {z.name} — رسوم التوصيل: {z.fee} ج.م
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {orderType === 'delivery' && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">العنوان</label>
             
@@ -456,11 +525,12 @@ export default function Checkout() {
               </>
             )}
           </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">طريقة الدفع</label>
-            <div className="grid grid-cols-2 gap-3">
-              {PAYMENT_METHODS.map((method) => (
+            <div className={`grid ${enableCash ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+              {PAYMENT_METHODS.filter(m => enableCash || m.id !== 'cash').map((method) => (
                 <button
                   key={method.id}
                   type="button"
@@ -482,11 +552,11 @@ export default function Checkout() {
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-center">
               <p className="text-sm text-yellow-300 mb-2">كود التحويل السريع (شامل المبلغ والرقم):</p>
               <div className="flex items-center justify-center gap-2 bg-black/50 px-4 py-2 rounded-lg border border-yellow-500/30 font-mono text-lg font-bold text-white" dir="ltr">
-                {selectedPayment.ussd.replace('*Amount*', total.toString()).replace(/01[0-9]{9}/, paymentNumber)}
+                {selectedPayment.ussd.replace('*Amount*', finalTotal.toString()).replace(/01[0-9]{9}/, paymentNumber)}
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(selectedPayment.ussd!.replace('*Amount*', total.toString()).replace(/01[0-9]{9}/, paymentNumber));
+                    navigator.clipboard.writeText(selectedPayment.ussd!.replace('*Amount*', finalTotal.toString()).replace(/01[0-9]{9}/, paymentNumber));
                     alert('تم نسخ الكود');
                   }}
                   className="ml-2 text-slate-400 hover:text-yellow-500"
@@ -495,12 +565,12 @@ export default function Checkout() {
                 </button>
               </div>
               <a 
-                href={`tel:${selectedPayment.ussd.replace('*Amount*', total.toString()).replace(/01[0-9]{9}/, paymentNumber).replace(/#/g, '%23')}`}
+                href={`tel:${selectedPayment.ussd.replace('*Amount*', finalTotal.toString()).replace(/01[0-9]{9}/, paymentNumber).replace(/#/g, '%23')}`}
                 className="inline-block mt-3 neon-button px-6 py-2 rounded-lg font-medium transition-colors"
               >
                 اتصل بالكود الآن
               </a>
-              <p className="text-xs text-yellow-500 mt-2">المبلغ المطلوب: {total} ج.م</p>
+              <p className="text-xs text-yellow-500 mt-2">المبلغ المطلوب: {finalTotal} ج.م</p>
             </div>
           )}
 
@@ -520,7 +590,7 @@ export default function Checkout() {
                   <Copy size={20} />
                 </button>
               </div>
-              <p className="text-xs text-yellow-500 mt-2">المبلغ المطلوب: {total} ج.م</p>
+              <p className="text-xs text-yellow-500 mt-2">المبلغ المطلوب: {finalTotal} ج.م</p>
             </div>
           )}
 
@@ -581,15 +651,15 @@ export default function Checkout() {
                 <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
                 {uploadingProof ? 'جاري رفع الصورة...' : 'جاري تأكيد الطلب...'}
               </>
-            ) : (
-              `تأكيد الطلب (${total} ج.م)`
+              ) : (
+              `تأكيد الطلب (${finalTotal} ج.م)`
             )}
           </button>
         </form>
 
         <div className="hidden md:block">
           <div className="glass-panel p-6 rounded-2xl border border-white/5 sticky top-24">
-            <h3 className="text-xl font-bold text-white mb-4">ملخص الطلب</h3>
+            <h3 className="text-xl font-bold text-white mb-4">ملخص الطلب — {restaurantName}</h3>
             <ul className="divide-y divide-white/10 mb-4">
               {items.map((item) => (
                 <li key={item.id} className="py-4 flex justify-between text-sm">
@@ -598,9 +668,15 @@ export default function Checkout() {
                 </li>
               ))}
             </ul>
+            {deliveryFee > 0 && (
+              <div className="pb-3 flex justify-between text-sm text-slate-300">
+                <span>رسوم التوصيل ({selectedZone?.name}):</span>
+                <span className="font-bold text-yellow-400" dir="ltr">{deliveryFee} ج.م</span>
+              </div>
+            )}
             <div className="pt-4 border-t border-white/10 flex justify-between items-center">
-              <span className="text-lg font-bold text-white">الإجمالي</span>
-              <span className="text-2xl font-black neon-text" dir="ltr">{total} ج.م</span>
+              <span className="text-lg font-bold text-white">الإجمالي النهائي</span>
+              <span className="text-2xl font-black neon-text" dir="ltr">{finalTotal} ج.م</span>
             </div>
           </div>
         </div>

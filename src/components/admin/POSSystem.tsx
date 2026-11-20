@@ -1,8 +1,9 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Category, MenuItem, CartItem, Order } from '../../types';
 import { Plus, Minus, Trash2, Printer, CheckCircle, Search, UtensilsCrossed, ShoppingBag, Truck } from 'lucide-react';
-import { collection, addDoc, serverTimestamp, doc, runTransaction, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { serverTimestamp, onSnapshot, runTransaction, getDoc, setDoc, updateDoc, addDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { tenantCollection as collection, tenantDoc as doc } from '../../tenantBootstrap';
 
 interface POSSystemProps {
   categories: Category[];
@@ -21,6 +22,25 @@ export default function POSSystem({ categories, menuItems }: POSSystemProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
+  const [restaurantSettings, setRestaurantSettings] = useState<{ restaurantName: string; commercialRegister: string; taxCardNumber: string }>({
+    restaurantName: ((typeof window !== 'undefined' && (window as any).__TENANT_BRAND__?.name) as string) || 'مطعم حرب',
+    commercialRegister: ((typeof window !== 'undefined' && (window as any).__TENANT_BRAND__?.commercialRegister) as string) || '',
+    taxCardNumber: ((typeof window !== 'undefined' && (window as any).__TENANT_BRAND__?.taxCardNumber) as string) || '',
+  });
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'general'), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setRestaurantSettings(prev => ({
+          restaurantName: d.restaurantName || prev.restaurantName,
+          commercialRegister: d.commercialRegister ?? prev.commercialRegister,
+          taxCardNumber: d.taxCardNumber ?? prev.taxCardNumber,
+        }));
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const filteredItems = useMemo(() => {
     return menuItems.filter(item => {
@@ -248,8 +268,10 @@ export default function POSSystem({ categories, menuItems }: POSSystemProps) {
           <!-- Customer Receipt -->
           <div class="receipt">
             <div class="header">
-              <h1 class="title">مطعم حرب</h1>
+              <h1 class="title">${restaurantSettings.restaurantName}</h1>
               <p class="subtitle">إيصال العميل</p>
+              ${restaurantSettings.commercialRegister ? `<div style="font-size:11px;color:#555;">سجل تجاري: ${restaurantSettings.commercialRegister}</div>` : ''}
+              ${restaurantSettings.taxCardNumber ? `<div style="font-size:11px;color:#555;">بطاقة ضريبية: ${restaurantSettings.taxCardNumber}</div>` : ''}
             </div>
             <div class="info">
               <div class="info-row"><span>رقم الطلب:</span> <span>#${order.orderNumber || order.id.slice(-6).toUpperCase()}</span></div>
@@ -282,7 +304,7 @@ export default function POSSystem({ categories, menuItems }: POSSystemProps) {
               <span>${order.totalAmount} ج.م</span>
             </div>
             <div class="footer">
-              شكراً لزيارتكم مطعم حرب!<br>
+              شكراً لزيارتكم ${restaurantSettings.restaurantName}!<br>
               نتمنى لكم وجبة شهية
             </div>
           </div>
@@ -290,7 +312,7 @@ export default function POSSystem({ categories, menuItems }: POSSystemProps) {
           <!-- Cashier Receipt -->
           <div class="receipt">
             <div class="header">
-              <h1 class="title">مطعم حرب</h1>
+              <h1 class="title">${restaurantSettings.restaurantName}</h1>
               <p class="subtitle">نسخة الكاشير</p>
             </div>
             <div class="info">

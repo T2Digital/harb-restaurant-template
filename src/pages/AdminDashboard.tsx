@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, secondaryAuth, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { query, orderBy, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { tenantCollection as collection, tenantDoc as doc } from '../tenantBootstrap';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -21,7 +22,16 @@ export default function AdminDashboard() {
   const [selectedProof, setSelectedProof] = useState<string | null>(null);
 
   // Settings state
+  const [restaurantName, setRestaurantName] = useState(
+    ((typeof window !== 'undefined' && (window as any).__TENANT_BRAND__?.name) as string) || 'مطعم حرب'
+  );
   const [paymentNumber, setPaymentNumber] = useState('');
+  const [enableCash, setEnableCash] = useState(true);
+  const [commercialRegister, setCommercialRegister] = useState('');
+  const [taxCardNumber, setTaxCardNumber] = useState('');
+  const [deliveryZones, setDeliveryZones] = useState<Array<{ id: string; name: string; fee: number }>>([]);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [newZoneFee, setNewZoneFee] = useState<number>(20);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   // Orders filter state
@@ -132,7 +142,13 @@ export default function AdminDashboard() {
 
     const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
       if (docSnap.exists()) {
-        setPaymentNumber(docSnap.data().paymentNumber || '');
+        const d = docSnap.data();
+        if (d.paymentNumber !== undefined) setPaymentNumber(d.paymentNumber || '');
+        if (d.restaurantName) setRestaurantName(d.restaurantName);
+        if (typeof d.enableCash === 'boolean') setEnableCash(d.enableCash);
+        if (d.commercialRegister !== undefined) setCommercialRegister(d.commercialRegister || '');
+        if (d.taxCardNumber !== undefined) setTaxCardNumber(d.taxCardNumber || '');
+        if (Array.isArray(d.deliveryZones)) setDeliveryZones(d.deliveryZones);
       }
     });
 
@@ -160,8 +176,15 @@ export default function AdminDashboard() {
     e.preventDefault();
     setIsSavingSettings(true);
     try {
-      await setDoc(doc(db, 'settings', 'general'), { paymentNumber }, { merge: true });
-      alert('تم حفظ الإعدادات بنجاح');
+      await setDoc(doc(db, 'settings', 'general'), {
+        restaurantName: restaurantName.trim() || 'مطعم حرب',
+        paymentNumber: paymentNumber.trim(),
+        enableCash,
+        commercialRegister: commercialRegister.trim(),
+        taxCardNumber: taxCardNumber.trim(),
+        deliveryZones,
+      }, { merge: true });
+      alert('تم حفظ الإعدادات ومناطق التوصيل بنجاح');
     } catch (error) {
       console.error("Error saving settings:", error);
       alert('حدث خطأ أثناء حفظ الإعدادات');
@@ -578,27 +601,96 @@ export default function AdminDashboard() {
         <div className="space-y-8">
           <div className="glass-panel p-6 rounded-2xl border border-white/5">
             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-              <CreditCard className="text-yellow-500" /> إعدادات الدفع
+              <CreditCard className="text-yellow-500" /> إعدادات المطعم والدفع ومناطق التوصيل
             </h2>
-            <form onSubmit={handleSaveSettings} className="space-y-4 max-w-md">
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">رقم الموبايل للتحويل (فودافون كاش، انستاباي، الخ)</label>
-                <input
-                  type="text"
-                  value={paymentNumber}
-                  onChange={(e) => setPaymentNumber(e.target.value)}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-yellow-500 transition-colors"
-                  placeholder="مثال: 01000000000"
-                  dir="ltr"
-                  required
-                />
+            <form onSubmit={handleSaveSettings} className="space-y-5 max-w-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">اسم المطعم (للفواتير ورسائل الواتساب)</label>
+                  <input
+                    type="text"
+                    value={restaurantName}
+                    onChange={(e) => setRestaurantName(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-yellow-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">رقم الموبايل للتحويل (فودافون كاش / انستاباي)</label>
+                  <input
+                    type="text"
+                    value={paymentNumber}
+                    onChange={(e) => setPaymentNumber(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-yellow-500 transition-colors"
+                    placeholder="مثال: 01000000000"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">رقم السجل التجاري (للفواتير)</label>
+                  <input
+                    type="text"
+                    value={commercialRegister}
+                    onChange={(e) => setCommercialRegister(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:border-yellow-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">رقم البطاقة الضريبية (للفواتير)</label>
+                  <input
+                    type="text"
+                    value={taxCardNumber}
+                    onChange={(e) => setTaxCardNumber(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:border-yellow-500 transition-colors"
+                  />
+                </div>
               </div>
+
+              <label className="flex items-center justify-between bg-black/40 border border-white/10 p-4 rounded-xl cursor-pointer">
+                <div>
+                  <div className="font-bold text-white text-sm">تفعيل الدفع كاش عند الاستلام</div>
+                  <div className="text-xs text-slate-400">عند إلغائه يختفي خيار الدفع كاش من صفحة إتمام الطلب</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={enableCash}
+                  onChange={(e) => setEnableCash(e.target.checked)}
+                  className="w-5 h-5 accent-yellow-500"
+                />
+              </label>
+
+              <div className="bg-black/30 border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="font-bold text-white text-sm">مناطق التوصيل وتكلفة الدليفري (ج.م)</div>
+                <div className="flex flex-wrap gap-2">
+                  {deliveryZones.map(z => (
+                    <span key={z.id} className="inline-flex items-center gap-2 bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 px-3 py-1.5 rounded-full text-xs font-bold">
+                      {z.name} ({z.fee} ج.م)
+                      <button type="button" onClick={() => setDeliveryZones(prev => prev.filter(x => x.id !== z.id))} className="text-red-400 hover:text-red-300 font-black">&times;</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input type="text" placeholder="اسم المنطقة (مثلاً: مدينة نصر)" value={newZoneName} onChange={e => setNewZoneName(e.target.value)} className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+                  <input type="number" min={0} placeholder="السعر" value={newZoneFee} onChange={e => setNewZoneFee(Number(e.target.value))} className="w-28 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newZoneName.trim()) return;
+                      setDeliveryZones(prev => [...prev, { id: `zone_${Date.now()}`, name: newZoneName.trim(), fee: Number(newZoneFee) || 0 }]);
+                      setNewZoneName('');
+                    }}
+                    className="px-4 py-2 bg-yellow-500 text-black font-bold rounded-xl text-sm"
+                  >
+                    + إضافة منطقة
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="submit"
                 disabled={isSavingSettings}
                 className="neon-button px-6 py-3 rounded-xl font-bold w-full disabled:opacity-50"
               >
-                {isSavingSettings ? 'جاري الحفظ...' : 'حفظ الإعدادات'}
+                {isSavingSettings ? 'جاري الحفظ...' : 'حفظ جميع الإعدادات'}
               </button>
             </form>
           </div>
@@ -916,13 +1008,13 @@ export default function AdminDashboard() {
                                 onClick={() => {
                                   let message = '';
                                   if (order.status === 'preparing') {
-                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nتم تأكيد طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} من مطعم حرب وهو الآن قيد التحضير 👨‍🍳🔥\n\nالإجمالي: ${order.totalAmount} ج.م\n\nشكراً لاختيارك مطعم حرب!`;
+                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nتم تأكيد طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} من ${restaurantName} وهو الآن قيد التحضير 👨‍🍳🔥\n\nالإجمالي: ${order.totalAmount} ج.م\n\nشكراً لاختيارك ${restaurantName}!`;
                                   } else if (order.status === 'out_for_delivery') {
-                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nطلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} خرج للتوصيل وهو في الطريق إليك الآن 🛵💨\n\nاستعد لاستلام أشهى الأكلات من مطعم حرب!`;
+                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nطلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} خرج للتوصيل وهو في الطريق إليك الآن 🛵💨\n\nاستعد لاستلام أشهى الأكلات من ${restaurantName}!`;
                                   } else if (order.status === 'delivered') {
-                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nتم توصيل طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} بنجاح ✅\n\nنتمنى لك وجبة شهية من مطعم حرب!`;
+                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\n\nتم توصيل طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()} بنجاح ✅\n\nنتمنى لك وجبة شهية من ${restaurantName}!`;
                                   } else {
-                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\nنتواصل معك من مطعم حرب بخصوص طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()}`;
+                                    message = `أهلاً بك يا ${order.customerName || 'عميلنا العزيز'} 👋\nنتواصل معك من ${restaurantName} بخصوص طلبك رقم #${order.orderNumber || order.id.slice(-6).toUpperCase()}`;
                                   }
                                   sendWhatsAppMessage(order.customerPhone, message);
                                 }}
