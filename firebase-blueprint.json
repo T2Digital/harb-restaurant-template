@@ -1,0 +1,96 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user of the application (customer, employee, or admin).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique user ID from Firebase Auth." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "displayName": { "type": "string", "description": "The user's full name." },
+        "photoURL": { "type": "string", "description": "URL to the user's profile picture." },
+        "role": { "type": "string", "enum": ["admin", "employee", "customer"], "description": "The user's role." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user was created." }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Represents a customer order.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string", "description": "The UID of the customer who placed the order." },
+        "customerName": { "type": "string", "description": "The name of the customer." },
+        "customerPhone": { "type": "string", "description": "The phone number of the customer." },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "price": { "type": "number" },
+              "quantity": { "type": "number" },
+              "notes": { "type": "string" }
+            },
+            "required": ["id", "name", "price", "quantity"]
+          },
+          "description": "The items in the order."
+        },
+        "totalAmount": { "type": "number", "description": "The total cost of the order." },
+        "status": { "type": "string", "enum": ["pending", "preparing", "out_for_delivery", "delivered", "cancelled"], "description": "The current status of the order." },
+        "paymentMethod": { "type": "string", "enum": ["cash", "vodafone_cash", "orange_cash", "etisalat_cash", "we_pay", "instapay"], "description": "The payment method used." },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid"], "description": "The payment status." },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "address": { "type": "string" }
+          },
+          "required": ["lat", "lng"]
+        },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the order was placed." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When the order was last updated." }
+      },
+      "required": ["customerId", "customerName", "customerPhone", "items", "totalAmount", "status", "paymentMethod", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Represents a menu item.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "sizes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "price": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["categoryId", "name", "price"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and roles."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Stores all customer orders."
+    },
+    "/menuItems/{itemId}": {
+      "schema": { "$ref": "#/entities/MenuItem" },
+      "description": "Stores all menu items."
+    }
+  }
+}

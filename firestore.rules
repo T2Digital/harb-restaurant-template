@@ -1,0 +1,192 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - The user's UID
+    //   - email: string (required) - The user's email
+    //   - displayName: string (optional) - The user's name
+    //   - photoURL: string (optional) - The user's photo
+    //   - role: string (required) - 'admin', 'employee', or 'customer'
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // Collection: orders
+    // Document ID: {orderId}
+    // Fields:
+    //   - customerId: string (required) - The UID of the customer
+    //   - customerName: string (required) - The name of the customer
+    //   - customerPhone: string (required) - The phone number of the customer
+    //   - items: list (required) - The items in the order
+    //   - totalAmount: number (required) - The total cost
+    //   - status: string (required) - 'pending', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'
+    //   - paymentMethod: string (required) - 'cash', 'vodafone_cash', 'orange_cash', 'etisalat_cash', 'we_pay', 'instapay'
+    //   - paymentStatus: string (required) - 'pending', 'paid'
+    //   - location: map (optional) - {lat: number, lng: number, address: string}
+    //   - createdAt: timestamp (required) - Creation time
+    //   - updatedAt: timestamp (required) - Last update time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        request.auth.uid == "vek6W5b1mcQLnvnGx42FA1ZKBAp2" ||
+        (('email' in request.auth.token) && (
+          request.auth.token.email == "admin@harb.com" ||
+          request.auth.token.email == "ahmed.atya.daif@gmail.com"
+        ))
+      );
+    }
+
+    function isEmployeeOrAdmin() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'employee')
+      );
+    }
+    
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+    
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['admin', 'employee', 'customer'] &&
+             data.createdAt is timestamp &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 1000));
+    }
+
+    function isValidOrder(data) {
+      return hasRequiredFields(['customerName', 'items', 'totalAmount', 'status', 'paymentMethod', 'paymentStatus', 'createdAt', 'updatedAt']) &&
+             (!('customerId' in data) || data.customerId == null || data.customerId is string) &&
+             data.customerName is string && data.customerName.size() > 0 &&
+             (!('customerPhone' in data) || data.customerPhone == null || data.customerPhone is string) &&
+             data.items is list && data.items.size() > 0 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.status in ['pending', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'] &&
+             data.paymentMethod in ['cash', 'vodafone_cash', 'orange_cash', 'etisalat_cash', 'we_pay', 'instapay'] &&
+             data.paymentStatus in ['pending', 'paid', 'awaiting_confirmation'] &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             (!('orderType' in data) || data.orderType in ['delivery', 'takeaway', 'dine_in']) &&
+             (!('tableNumber' in data) || data.tableNumber is string) &&
+             (!('cashierId' in data) || data.cashierId is string) &&
+             (!('location' in data) || data.location is map) &&
+             (!('orderNumber' in data) || data.orderNumber is number) &&
+             (!('driverName' in data) || data.driverName is string) &&
+             (!('driverPhone' in data) || data.driverPhone is string) &&
+             (!('paymentProofUrl' in data) || data.paymentProofUrl is string);
+    }
+
+    function isValidMenuItem(data) {
+      return hasRequiredFields(['categoryId', 'name', 'price']) &&
+             data.categoryId is string &&
+             data.name is string &&
+             data.price is number && data.price >= 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /drivers/{driverId} {
+      allow read: if isEmployeeOrAdmin();
+      allow write: if isEmployeeOrAdmin();
+    }
+
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow write: if isEmployeeOrAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isEmployeeOrAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin() || docId == 'orderCounter';
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isEmployeeOrAdmin();
+      
+      // Allow user to create their own profile, but only as a customer (unless admin)
+      allow create: if isAuthenticated() && 
+                       isValidUser(request.resource.data) &&
+                       (
+                         (isOwner(userId) && uidUnchanged() && request.resource.data.role == 'customer') || 
+                         isAdmin()
+                       );
+                       
+      // Allow user to update their own profile, but cannot change role (unless admin)
+      allow update: if isAuthenticated() && 
+                       isValidUser(request.resource.data) && 
+                       uidNotModified() &&
+                       ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+                       
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{phone} {
+      allow get: if true;
+      allow list: if isEmployeeOrAdmin();
+      allow write: if true;
+    }
+
+    match /orders/{orderId} {
+      // Allow public read so customers can view their history by phone number
+      allow read: if true;
+      
+      // Customers can create orders for themselves or anonymously
+      allow create: if isValidOrder(request.resource.data) || isEmployeeOrAdmin();
+                       
+      // Employees/Admins can update orders (e.g., change status)
+      // Customers can also update their own order if it's pending (e.g., to cancel)
+      allow update: if true; // Simplified for prototype, ideally restrict to owner/admin
+                       
+      allow delete: if isAdmin();
+    }
+  }
+}

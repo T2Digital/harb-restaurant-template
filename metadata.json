@@ -1,0 +1,5 @@
+{
+  "name": "Harb Restaurant",
+  "description": "Advanced online ordering system for Harb Restaurant with AI waiter, location sharing, and electronic payments.",
+  "requestFramePermissions": ["geolocation"]
+}
